@@ -24,6 +24,84 @@ from meme_generator.public_input import BoundedUploadMiddleware, validate_image_
 app = FastAPI()
 app.add_middleware(BoundedUploadMiddleware)
 
+# 允许浏览器跨站调用: 本服务本来就是公开的(任何客户端 curl 即可), CORS 只影响浏览器,
+# 加上它不减少任何保护, 只是让 心华.com 的表情工坊页面可以直连这里出图 ——
+# 否则那些图要绕经 心华.com 的服务器中转一趟, 白占一份带宽。
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+
+# 允许跨站的站点页面(心华.com / 维里奈.com 及备用入口)。下面的公网限频对这些 Origin 发来的请求放宽一档
+PUBLIC_ORIGINS = [
+    "https://xn--xkrt30a.com",
+    "https://www.xn--xkrt30a.com",
+    "https://xn--ntsp09fr3m.com",  # 维里奈.com（小维官网，同人帖「小维表情包制作」直连出图）
+    "https://www.xn--ntsp09fr3m.com",
+    "https://bot.loping151.site",
+    "https://loping151.site",  # 备用入口 loping151.site/bot
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=PUBLIC_ORIGINS,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*"],
+)
+
+# 公网限频: 只管从 frp 进来的生成请求(frpc 的 https2http 插件给每个请求加了 x-from-where: frp,
+# 并把真实客户端地址写进 X-Forwarded-For), 本机 / bot 直连 127.0.0.1 不受影响。
+# 生成一张约一秒、都在一块卡上算, 额度只能给到这个量级; 预览 / info / keys 不计。
+from collections import defaultdict, deque  # noqa: E402
+import time as _time  # noqa: E402
+from fastapi import Request as _Request  # noqa: E402
+from fastapi.responses import JSONResponse as _JSONResponse  # noqa: E402
+
+# 两档: 自家站点页面(Origin 在白名单里)连着改字也是一次一张, 给宽一点; 其它(curl / 机器人)按 API 的量给。
+# Origin 谁都能伪造, 这只是给自家页面让路, 不是安全措施。
+PUBLIC_RENDER_PER_MINUTE = 30
+PUBLIC_RENDER_PER_DAY = 600
+SITE_RENDER_PER_MINUTE = 60
+SITE_RENDER_PER_DAY = 2000
+_pub_minute: dict[str, deque] = defaultdict(deque)
+_pub_day: dict[str, deque] = defaultdict(deque)
+
+
+def _public_allow(ip: str, per_minute: int, per_day: int) -> bool:
+    now = _time.time()
+    m, d = _pub_minute[ip], _pub_day[ip]
+    while m and now - m[0] >= 60:
+        m.popleft()
+    while d and now - d[0] >= 86400:
+        d.popleft()
+    if len(m) >= per_minute or len(d) >= per_day:
+        return False
+    m.append(now)
+    d.append(now)
+    if len(_pub_minute) > 4096:
+        for k in [k for k, v in _pub_minute.items() if not v]:
+            del _pub_minute[k]
+        for k in [k for k, v in _pub_day.items() if not v]:
+            del _pub_day[k]
+    return True
+
+
+@app.middleware("http")
+async def _public_rate_limit(request: _Request, call_next):
+    if (
+        request.method == "POST"
+        and request.url.path.startswith("/memes/")
+        and request.headers.get("x-from-where") == "frp"
+    ):
+        ip = (request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+              or (request.client.host if request.client else "?"))
+        origin = request.headers.get("origin", "")
+        site = origin in PUBLIC_ORIGINS
+        per_minute, per_day = (SITE_RENDER_PER_MINUTE, SITE_RENDER_PER_DAY) if site else (PUBLIC_RENDER_PER_MINUTE, PUBLIC_RENDER_PER_DAY)
+        if not _public_allow(("site:" if site else "api:") + ip, per_minute, per_day):
+            return _JSONResponse(
+                {"detail": "生成请求过于频繁", "hint": f"每分钟 {per_minute} 次, 每天 {per_day} 次; 预览不计入。"},
+                status_code=429,
+                headers={"Retry-After": "60", "Access-Control-Allow-Origin": origin or "*"},
+            )
+    return await call_next(request)
+
 
 class MemeArgsResponse(BaseModel):
     args_model: dict[str, Any]
