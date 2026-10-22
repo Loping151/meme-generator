@@ -1,0 +1,10 @@
+{
+  "upstream": {
+    "version": "0.2.2",
+    "url": "https://files.pythonhosted.org/packages/a3/7a/69d326549b848f1fcad1badd8717208256fe12bc4e72666e3e5b3d13a165/pil_utils-0.2.2.tar.gz",
+    "sha256": "4d7855ec387691dec5eddaaef2583d82b4855c13006dc980c7fffb7bd35bc4ef"
+  },
+  "private_wheel": "/home/loping/.cache/fleet-security-20261022/pillow13/wheels/pil_utils-0.2.2+fleet.pillow13-py3-none-any.whl",
+  "sha256": "79c801545af88bb4ee6c2d05df1d2c3f1d6ecdfdcfce4a4259a4ea62a1843745",
+  "change": "dependency metadata only; application compatibility tests required"
+}
