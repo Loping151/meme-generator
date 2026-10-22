@@ -19,7 +19,10 @@ from meme_generator.meme import CommandShortcut, Meme, MemeArgsModel, ParserOpti
 from meme_generator.utils import MemeProperties, render_meme_list, run_sync
 from meme_generator.version import __version__
 
+from meme_generator.public_input import BoundedUploadMiddleware, validate_image_budget
+
 app = FastAPI()
+app.add_middleware(BoundedUploadMiddleware)
 
 
 class MemeArgsResponse(BaseModel):
@@ -74,6 +77,7 @@ def register_router(meme: Meme):
         imgs: list[bytes] = []
         for image in images:
             imgs.append(await image.read())
+        validate_image_budget(imgs)
 
         texts = [text for text in texts if text]
 
